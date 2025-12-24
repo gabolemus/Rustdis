@@ -24,7 +24,7 @@ fn main() -> Result<(), std::io::Error> {
     println!("Running server on http://{ip}");
 
     for stream in listener.incoming() {
-        let stream = stream?;
+        let stream = stream.expect("Failed to accept incoming TCP connection");
 
         handle_connection(stream)?;
     }
