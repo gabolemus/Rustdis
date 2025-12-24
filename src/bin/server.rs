@@ -1,5 +1,6 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
+use std::thread;
 
 fn handle_connection(mut stream: TcpStream) -> std::io::Result<()> {
     let buf_reader = BufReader::new(&stream);
@@ -26,7 +27,11 @@ fn main() -> Result<(), std::io::Error> {
     for stream in listener.incoming() {
         let stream = stream.expect("Failed to accept incoming TCP connection");
 
-        handle_connection(stream)?;
+        thread::spawn(move || {
+            if let Err(e) = handle_connection(stream) {
+                eprintln!("Error handling connection: {e}");
+            }
+        });
     }
 
     Ok(())
