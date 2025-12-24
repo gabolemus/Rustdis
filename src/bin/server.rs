@@ -1,7 +1,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 
-fn handle_connection(mut stream: TcpStream) {
+fn handle_connection(mut stream: TcpStream) -> std::io::Result<()> {
     let buf_reader = BufReader::new(&stream);
     let _http_request: Vec<_> = buf_reader
         .lines()
@@ -9,10 +9,13 @@ fn handle_connection(mut stream: TcpStream) {
         .take_while(|line| !line.is_empty())
         .collect();
 
-    let response = "HTTP/1.1 200 OK\r\n\r\n";
-    stream
-        .write(response.as_bytes())
-        .expect("Could not write to TCP stream");
+    let status_line = "HTTP/1.1 200 OK";
+    let contents = "{ \"message\": \"Hello!\" }";
+    let length = contents.len();
+
+    let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
+
+    stream.write_all(response.as_bytes())
 }
 
 fn main() -> Result<(), std::io::Error> {
@@ -23,7 +26,7 @@ fn main() -> Result<(), std::io::Error> {
     for stream in listener.incoming() {
         let stream = stream?;
 
-        handle_connection(stream);
+        handle_connection(stream)?;
     }
 
     Ok(())
