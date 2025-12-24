@@ -1,15 +1,18 @@
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 
-fn handle_connection(stream: TcpStream) {
+fn handle_connection(mut stream: TcpStream) {
     let buf_reader = BufReader::new(&stream);
-    let http_request: Vec<_> = buf_reader
+    let _http_request: Vec<_> = buf_reader
         .lines()
         .map(|result| result.expect("Could not get HTTP request"))
         .take_while(|line| !line.is_empty())
         .collect();
 
-    println!("Request: {http_request:#?}");
+    let response = "HTTP/1.1 200 OK\r\n\r\n";
+    stream
+        .write(response.as_bytes())
+        .expect("Could not write to TCP stream");
 }
 
 fn main() -> Result<(), std::io::Error> {
