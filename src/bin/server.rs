@@ -2,21 +2,67 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
-fn handle_connection(mut stream: TcpStream) -> std::io::Result<()> {
-    let buf_reader = BufReader::new(&stream);
-    let _http_request: Vec<_> = buf_reader
-        .lines()
-        .map(|result| result.expect("Could not get HTTP request"))
-        .take_while(|line| !line.is_empty())
-        .collect();
-
-    let status_line = "HTTP/1.1 200 OK";
-    let contents = "{ \"message\": \"Hello!\" }";
-    let length = contents.len();
-
-    let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
+fn write_json_response(
+    mut stream: TcpStream,
+    status_line: &str,
+    json_body: &str,
+) -> std::io::Result<()> {
+    let length = json_body.as_bytes().len();
+    let response = format!(
+        "{status_line}\r\n\
+        Content-Type: application/json; charset=utf-8\r\n\
+        Content-Lenth: {length}\r\n\
+        Connection: close\r\n\
+        \r\n\
+        {json_body}"
+    );
 
     stream.write_all(response.as_bytes())
+}
+
+fn handle_connection(stream: TcpStream) -> std::io::Result<()> {
+    let mut buf_reader = BufReader::new(&stream);
+    let mut request_line = String::new();
+
+    buf_reader
+        .read_line(&mut request_line)
+        .expect("Failed to read HTTP request line from TCP stream");
+
+    let request_line = request_line.trim_end_matches(&['\r', '\n'][..]);
+    println!("Request line: {request_line}");
+
+    // Drain and ignore headers until the blank line
+    loop {
+        let mut header_line = String::new();
+        let bytes = buf_reader
+            .read_line(&mut header_line)
+            .expect("Failed while reading HTTP request headers");
+
+        if bytes == 0 {
+            // Client closed connection early
+            break;
+        }
+
+        let newlines = vec!["\r\n", "\n"];
+        if newlines.contains(&header_line.as_str()) {
+            break;
+        }
+    }
+
+    // Naive routing: only exact "GET / HTTP/1.1"
+    if request_line == "GET / HTTP/1.1" {
+        write_json_response(
+            stream,
+            "HTTP/1.1 200 OK",
+            r#"{ "message": "Dummy correct response!" }"#,
+        )
+    } else {
+        write_json_response(
+            stream,
+            "HTTP/1.1 404 Not Found",
+            r#"{ "message": "Page not found" }"#,
+        )
+    }
 }
 
 fn main() -> Result<(), std::io::Error> {
