@@ -66,7 +66,7 @@ fn handle_connection(stream: TcpStream) -> std::io::Result<()> {
 }
 
 fn main() -> Result<(), std::io::Error> {
-    let ip = "127.0.0.1:7878";
+    let ip = "0.0.0.0:7878";
     let listener = TcpListener::bind(ip)?;
     println!("Running server on http://{ip}");
 
