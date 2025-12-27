@@ -48,17 +48,22 @@ fn build_json_response(status_line: &str, json_body: &str) -> Vec<u8> {
 /// The sequence of bytes of the response.
 fn route_request_line(request_line: &[u8]) -> Vec<u8> {
     let line = std::str::from_utf8(request_line).unwrap_or("");
+    println!("Line: {line}");
 
-    if line == "GET / HTTP/1.1" {
-        build_json_response(
-            "HTTP/1.1 200 OK",
-            r#"{ "message": "Dummy correct response!" }"#,
-        )
-    } else {
-        build_json_response(
+    match line {
+        "GET /get HTTP/1.1" | "GET /GET HTTP/1.1" => {
+            build_json_response("HTTP/1.1 200 OK", r#"{ "message": "GET operation" }"#)
+        }
+        "POST /set HTTP/1.1" | "POST /SET HTTP/1.1" => {
+            build_json_response("HTTP/1.1 200 OK", r#"{ "message": "SET operation" }"#)
+        }
+        "DELETE /del HTTP/1.1" | "DELETE /DEL HTTP/1.1" => {
+            build_json_response("HTTP/1.1 200 OK", r#"{ "message": "DEL operation" }"#)
+        }
+        _ => build_json_response(
             "HTTP/1.1 404 Not Found",
-            r#"{ "message": "Page not found" }"#,
-        )
+            r#"{ "message": "Unrecognized command. Available commands are: 'GET', 'SET' and 'DEL'" }"#,
+        ),
     }
 }
 
