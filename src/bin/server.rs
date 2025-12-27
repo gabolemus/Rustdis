@@ -1,84 +1,103 @@
-use std::io::{BufRead, BufReader, Write};
-use std::net::{TcpListener, TcpStream};
-use std::thread;
+use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{TcpListener, TcpStream};
 
-fn write_json_response(
-    mut stream: TcpStream,
+/// Writes the JSON response to the TCP stream.
+///
+/// # Params
+/// - `writer`: TCP stream to write to.
+/// - `status_line`: HTTP response status.
+/// - `json_body`: JSON body of the response.
+async fn write_json_response(
+    mut writer: impl AsyncWriteExt + Unpin,
     status_line: &str,
     json_body: &str,
-) -> std::io::Result<()> {
+) -> io::Result<()> {
     let length = json_body.as_bytes().len();
+
     let response = format!(
         "{status_line}\r\n\
-        Content-Type: application/json; charset=utf-8\r\n\
-        Content-Lenth: {length}\r\n\
-        Connection: close\r\n\
-        \r\n\
-        {json_body}"
+         Content-Type: application/json; charset=utf-8\r\n\
+         Content-Length: {length}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {json_body}"
     );
 
-    stream.write_all(response.as_bytes())
+    writer.write_all(response.as_bytes()).await?;
+    writer.flush().await?;
+    Ok(())
 }
 
-fn handle_connection(stream: TcpStream) -> std::io::Result<()> {
-    let mut buf_reader = BufReader::new(&stream);
-    let mut request_line = String::new();
+/// Naïve HTTP get parser.
+///
+/// # Params
+/// - `stream`: TCP stream to read and write to.
+async fn handle_connection(stream: TcpStream) -> io::Result<()> {
+    // Splitting makes it easy to read and write concurrently
+    let (read_half, mut write_half) = stream.into_split();
+    let mut reader = BufReader::new(read_half);
 
-    buf_reader
-        .read_line(&mut request_line)
-        .expect("Failed to read HTTP request line from TCP stream");
+    // 1) Read request line
+    let mut request_line = String::new();
+    let n = reader.read_line(&mut request_line).await?;
+    if n == 0 {
+        // Client closed immediately
+        return Ok(());
+    }
 
     let request_line = request_line.trim_end_matches(&['\r', '\n'][..]);
     println!("Request line: {request_line}");
 
-    // Drain and ignore headers until the blank line
+    // 2) Drain headers until blank line
     loop {
         let mut header_line = String::new();
-        let bytes = buf_reader
-            .read_line(&mut header_line)
-            .expect("Failed while reading HTTP request headers");
-
+        let bytes = reader.read_line(&mut header_line).await?;
         if bytes == 0 {
-            // Client closed connection early
-            break;
+            // Client closed early
+            return Ok(());
         }
 
-        let newlines = vec!["\r\n", "\n"];
-        if newlines.contains(&header_line.as_str()) {
+        if header_line == "\r\n" || header_line == "\n" {
             break;
         }
     }
 
-    // Naive routing: only exact "GET / HTTP/1.1"
+    // 3) Naive routing
     if request_line == "GET / HTTP/1.1" {
         write_json_response(
-            stream,
+            &mut write_half,
             "HTTP/1.1 200 OK",
             r#"{ "message": "Dummy correct response!" }"#,
         )
+        .await?;
     } else {
         write_json_response(
-            stream,
+            &mut write_half,
             "HTTP/1.1 404 Not Found",
             r#"{ "message": "Page not found" }"#,
         )
+        .await?;
     }
+
+    // 4) Close connection
+    write_half.shutdown().await?;
+    Ok(())
 }
 
-fn main() -> Result<(), std::io::Error> {
+#[tokio::main]
+async fn main() -> io::Result<()> {
     let ip = "0.0.0.0:7878";
-    let listener = TcpListener::bind(ip)?;
+    let listener = TcpListener::bind(ip).await?;
     println!("Running server on http://{ip}");
 
-    for stream in listener.incoming() {
-        let stream = stream.expect("Failed to accept incoming TCP connection");
+    loop {
+        let (stream, _addr) = listener.accept().await?; // async accept
 
-        thread::spawn(move || {
-            if let Err(e) = handle_connection(stream) {
+        // Spawn a lightweight async task
+        tokio::spawn(async move {
+            if let Err(e) = handle_connection(stream).await {
                 eprintln!("Error handling connection: {e}");
             }
         });
     }
-
-    Ok(())
 }
