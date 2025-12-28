@@ -291,6 +291,42 @@ where
     }
 }
 
+pub struct Iter<'a, K, V> {
+    buckets: std::slice::Iter<'a, Vec<(K, V)>>,
+    current_bucket_iter: Option<std::slice::Iter<'a, (K, V)>>,
+}
+
+impl<'a, K, V> Iterator for Iter<'a, K, V> {
+    type Item = (&'a K, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // Try to pull from the current bucket first
+            if let Some(ref mut bucket_iter) = self.current_bucket_iter {
+                if let Some((k, v)) = bucket_iter.next() {
+                    return Some((k, v));
+                }
+            }
+
+            // Current bucket exhausted (or none yet), move to next bucket
+            let next_bucket = self.buckets.next()?;
+            self.current_bucket_iter = Some(next_bucket.iter());
+        }
+    }
+}
+
+impl<K, V> HashMap<K, V>
+where
+    K: Eq + Hash,
+{
+    pub fn iter(&self) -> Iter<'_, K, V> {
+        Iter {
+            buckets: self.buckets.iter(),
+            current_bucket_iter: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::HashMap;
