@@ -10,7 +10,7 @@ pub enum Command<'a> {
     /// Delete the `key` from the store if it exists.
     Del { key: &'a [u8] },
     /// Returns the number of keys stored.
-    DbKeys,
+    DbKeysNumber,
 }
 
 /// Errors that can occur while parsing the HTTP request.

@@ -97,7 +97,7 @@ async fn execute_command(map: Arc<Mutex<HashMap<String, String>>>, cmd: Command<
             )
         }
 
-        Command::DbKeys => {
+        Command::DbKeysNumber => {
             let guard = map.lock().await;
             let len = guard.len();
             build_json_response(
