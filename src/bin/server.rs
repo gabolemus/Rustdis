@@ -12,7 +12,7 @@ async fn main() -> io::Result<()> {
     let listener = TcpListener::bind(ip).await?;
     println!("Running server on http://{ip}");
 
-    let datastore: Arc<Mutex<HashMap>> = Arc::new(Mutex::new(HashMap::new()));
+    let datastore: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
 
     loop {
         let (stream, _addr) = listener.accept().await?;
