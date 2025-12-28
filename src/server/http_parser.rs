@@ -77,6 +77,11 @@ pub fn parse_command_from_request_line<'a>(
 
     match method {
         b"GET" => {
+            // Get the number of keys stored
+            if path == b"/dbkeys" {
+                return Ok(Command::DbKeys);
+            }
+
             if path != b"/get" {
                 return Err(ParseError::UnsupportedPath);
             }

@@ -96,6 +96,15 @@ async fn execute_command(map: Arc<Mutex<HashMap<String, String>>>, cmd: Command<
                 &format!(r#"{{ "ok": true, "removed": {removed} }}"#),
             )
         }
+
+        Command::DbKeys => {
+            let guard = map.lock().await;
+            let len = guard.len();
+            build_json_response(
+                "HTTP/1.1 200 OK",
+                &format!(r#"{{ "ok": true, "totalKeys": {len} }}"#),
+            )
+        }
     }
 }
 
