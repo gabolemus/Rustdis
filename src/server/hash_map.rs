@@ -116,6 +116,28 @@ where
         self.buckets.iter().map(|b| b.len().saturating_sub(1)).sum()
     }
 
+    /// Returns a vector of references to all keys in the map.
+    ///
+    /// The keys are returned in *__no particular order__*.
+    /// The returned references are valid as long as `self` is borrowed.
+    pub fn keys(&self) -> Vec<&K> {
+        self.buckets
+            .iter()
+            .flat_map(|bucket| bucket.iter().map(|(k, _v)| k))
+            .collect()
+    }
+
+    /// Returns a vector of references to all values in the map.
+    ///
+    /// The values are returned in *__no particular order__*.
+    /// The returned references are valid as long as `self` is borrowed.
+    pub fn values(&self) -> Vec<&V> {
+        self.buckets
+            .iter()
+            .flat_map(|bucket| bucket.iter().map(|(_k, v)| v))
+            .collect()
+    }
+
     // =========================== Hashing/indexing ===========================
 
     /// Hashes a key using Rust's standard `Hash` trait and returns a 64-bit hash.
