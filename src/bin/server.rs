@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rustdis::server::connection;
+use rustdis::server::runner;
 use tokio::io;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -19,7 +19,7 @@ async fn main() -> io::Result<()> {
         let datastore = Arc::clone(&datastore);
 
         tokio::spawn(async move {
-            if let Err(e) = connection::handle_connection(stream, datastore).await {
+            if let Err(e) = runner::handle_connection(stream, datastore).await {
                 eprintln!("Error handling connection: {e}");
             }
         });
