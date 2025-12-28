@@ -1,12 +1,12 @@
 //! TCP-IP connection utilities.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::io::{self, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
+use crate::server::hash_map::HashMap;
 use crate::server::http_parser;
 use crate::server::utilities::{Command, ParseError};
 
@@ -25,7 +25,7 @@ fn build_json_response(status_line: &str, json_body: &str) -> Vec<u8> {
 }
 
 /// Execute command against shared map under a Mutex.
-async fn execute_command(map: Arc<Mutex<HashMap<String, String>>>, cmd: Command<'_>) -> Vec<u8> {
+async fn execute_command(map: Arc<Mutex<HashMap>>, cmd: Command<'_>) -> Vec<u8> {
     match cmd {
         Command::Get { key } => {
             let key = match http_parser::bytes_to_string(key) {
@@ -109,7 +109,7 @@ async fn execute_command(map: Arc<Mutex<HashMap<String, String>>>, cmd: Command<
 /// An I/O result based on if the process was successful.
 pub async fn handle_connection(
     mut stream: TcpStream,
-    datastore: Arc<Mutex<HashMap<String, String>>>,
+    datastore: Arc<Mutex<HashMap>>,
 ) -> io::Result<()> {
     // 1) Read headers
     let (buf, header_end) = match http_parser::read_until_headers(&mut stream).await {

@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
+use rustdis::server::hash_map::HashMap;
 use rustdis::server::runner;
 use tokio::io;
 use tokio::net::TcpListener;
@@ -12,7 +12,7 @@ async fn main() -> io::Result<()> {
     let listener = TcpListener::bind(ip).await?;
     println!("Running server on http://{ip}");
 
-    let datastore: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+    let datastore: Arc<Mutex<HashMap>> = Arc::new(Mutex::new(HashMap::new()));
 
     loop {
         let (stream, _addr) = listener.accept().await?;
