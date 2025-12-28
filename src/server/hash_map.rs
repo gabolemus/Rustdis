@@ -1,47 +1,120 @@
 //! Custom hash map implementation for learning purposes.
 
-/// Custom HashMap implementation.
+/// A minimal, learning-oriented hash map using **separate chaining**.
+///
+/// - Buckets are stored as a `Vec` of `Vec`s.
+/// - Each bucket holds `(String, String)` key/value pairs.
+/// - Collisions are resolved by storing multiple pairs in the same bucket vector.
+///
+/// This implementation supports:
+/// - `insert` / `get` / `remove`
+/// - Grow when projected load factor >= 0.75
+/// - Shrink after removals when load factor < 0.2
+/// - Simple metrics: cumulative collision inserts + max chain length
 #[derive(Debug)]
 pub struct HashMap {
-    /// Available slots in the HashMap.
+    /// Buckets of chained key/value pairs.
+    ///
+    /// The outer vector length is the number of buckets. Each inner vector is a chain.
     buckets: Vec<Vec<(String, String)>>,
-    /// Number of stored key/value pairs.
+
+    /// Total number of stored key/value pairs across all buckets.
     len: usize,
+
+    /// Minimum bucket count this map will ever shrink to.
+    ///
+    /// In this implementation it is set to the **initial bucket count** at construction time
+    /// (after applying the minimum default of 10).
+    min_buckets: usize,
+
+    /// Cumulative metric: number of *new-key* inserts that landed in a non-empty bucket.
+    ///
+    /// This is a simple proxy for “how often did we collide on insert over the lifetime of the map”.
+    collision_inserts: usize,
+
+    /// Current maximum chain length across all buckets.
+    ///
+    /// This is recomputed after `rehash_to` and after successful `remove`.
+    max_chain_len: usize,
 }
 
 impl HashMap {
-    /// Creates a new HashMap with 10 available buckets.
+    // ========================= Creation functions =========================
+
+    /// Creates a new `HashMap` with a default of **10 buckets**.
     pub fn new() -> Self {
         Self::with_capacity(10)
     }
 
-    /// Creates a new HashMap with the given capacity. If the size is 0, a HashMap with 10 buckets
-    /// is created.
+    /// Creates a new `HashMap` with at least `size` buckets.
+    ///
+    /// If `size < 10`, this will allocate **10 buckets** (minimum default).
+    ///
+    /// Note: the resulting initial bucket count becomes the minimum shrink size (`min_buckets`).
     pub fn with_capacity(size: usize) -> Self {
         let size = size.max(10);
 
         Self {
             buckets: (0..size).map(|_| Vec::new()).collect(),
             len: 0,
+            min_buckets: size,
+            collision_inserts: 0,
+            max_chain_len: 0,
         }
     }
 
-    /// Returns the amount of items currently stored.
+    // ============================ Basic stats =============================
+
+    /// Returns the number of stored key/value pairs.
+    ///
+    /// With separate chaining, this is the total count of pairs across all chains,
+    /// *not* the number of non-empty buckets.
     pub fn len(&self) -> usize {
         self.len
     }
 
-    /// Returns the number of available buckets.
+    /// Returns `true` if the map contains no key/value pairs.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns the number of buckets (the outer vector length).
     pub fn bucket_count(&self) -> usize {
         self.buckets.len()
     }
 
-    /// Computes the load factor of the hash map.
+    /// Returns the load factor α = `len / bucket_count`.
+    ///
+    /// For separate chaining, this is also the **average expected chain length**
+    /// under uniform hashing.
     pub fn load_factor(&self) -> f64 {
         self.len() as f64 / self.bucket_count() as f64
     }
 
-    /// FNV-1a 64-bit hash.
+    /// Returns the cumulative number of *new-key* inserts that collided
+    /// (i.e., were inserted into a non-empty bucket).
+    pub fn collision_inserts(&self) -> usize {
+        self.collision_inserts
+    }
+
+    /// Returns the current maximum chain length across all buckets.
+    pub fn max_chain_len(&self) -> usize {
+        self.max_chain_len
+    }
+
+    /// Returns a derived “current collisions” count.
+    ///
+    /// This counts how many items are stored beyond the first in each bucket:
+    /// `sum(max(bucket_len - 1, 0))`.
+    pub fn current_collisions(&self) -> usize {
+        self.buckets.iter().map(|b| b.len().saturating_sub(1)).sum()
+    }
+
+    // =========================== Hashing/indexing ===========================
+
+    /// Computes a 64-bit FNV-1a hash for a key.
+    ///
+    /// This is a simple non-cryptographic hash suitable for learning purposes.
     fn hash(key: &str) -> u64 {
         const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
         const FNV_PRIME: u64 = 0x00000100000001B3;
@@ -54,23 +127,32 @@ impl HashMap {
         hash
     }
 
+    /// Computes the bucket index for `key` given a bucket count.
     fn bucket_index_for(bucket_len: usize, key: &str) -> usize {
         (Self::hash(key) as usize) % bucket_len
     }
 
-    /// Map a key to a bucket index.
+    /// Computes the bucket index for `key` in the current table.
     fn bucket_index(&self, key: &str) -> usize {
         Self::bucket_index_for(self.buckets.len(), key)
     }
 
-    /// Grow bucket count and rehash everything.
+    // =========================== Rehash/resizing ===========================
+
+    /// Recomputes `max_chain_len` from scratch.
+    fn recompute_max_chain_len(&mut self) {
+        self.max_chain_len = self.buckets.iter().map(|b| b.len()).max().unwrap_or(0);
+    }
+
+    /// Rehashes all entries into a new table with `new_bucket_count` buckets.
+    ///
+    /// This moves keys and values without cloning.
     fn rehash_to(&mut self, new_bucket_count: usize) {
         assert!(new_bucket_count > 0);
 
         let mut new_buckets: Vec<Vec<(String, String)>> =
             (0..new_bucket_count).map(|_| Vec::new()).collect();
 
-        // Move all existing pairs into new buckets (no clones).
         for mut bucket in self.buckets.drain(..) {
             for (k, v) in bucket.drain(..) {
                 let idx = Self::bucket_index_for(new_bucket_count, &k);
@@ -79,40 +161,85 @@ impl HashMap {
         }
 
         self.buckets = new_buckets;
+        // len is unchanged.
+        self.recompute_max_chain_len();
     }
 
-    fn maybe_grow_for_insert(&mut self) {
-        // If we insert one more element, will load factor be >= 0.75?
+    /// Grows the table if inserting one new element would make load factor >= 0.75.
+    fn maybe_grow_for_new_insert(&mut self) {
         let projected_len = self.len + 1;
         let projected_load = projected_len as f64 / self.buckets.len() as f64;
 
         if projected_load >= 0.75 {
-            // Minimal strategy: double bucket count (common approach).
-            let new_count = self.buckets.len() * 2;
-            self.rehash_to(new_count);
+            self.rehash_to(self.buckets.len() * 2);
         }
     }
 
-    /// Insert key/value. If key existed, replace and return old value.
-    /// If new key would push load factor to >= 0.75, grow + rehash first.
+    /// Shrinks the table after a successful removal if load factor drops below 0.2.
+    ///
+    /// Never shrinks below `min_buckets`.
+    fn maybe_shrink_after_remove(&mut self) {
+        if self.buckets.len() <= self.min_buckets {
+            return;
+        }
+
+        if self.len == 0 {
+            if self.buckets.len() != self.min_buckets {
+                self.rehash_to(self.min_buckets);
+            }
+            return;
+        }
+
+        if self.load_factor() < 0.2 {
+            let mut new_count = self.buckets.len() / 2;
+            if new_count < self.min_buckets {
+                new_count = self.min_buckets;
+            }
+            if new_count != self.buckets.len() {
+                self.rehash_to(new_count);
+            }
+        }
+    }
+
+    // =========================== Core operations ===========================
+
+    /// Inserts a key/value pair.
+    ///
+    /// - If the key already exists, replaces the value and returns the old value (`Some(old)`).
+    /// - If the key is new:
+    ///   - grows the table if projected load factor >= 0.75
+    ///   - inserts the pair into the computed bucket
+    ///   - increments `len`
+    ///   - updates metrics (`collision_inserts`, `max_chain_len`)
     pub fn insert(&mut self, key: String, value: String) -> Option<String> {
-        // First check if key already exists (so we don't grow unnecessarily).
+        // Existing key? Replace in-place; do not grow; do not change len.
         let idx = self.bucket_index(&key);
         if let Some((_, v)) = self.buckets[idx].iter_mut().find(|(k, _)| k == &key) {
             return Some(std::mem::replace(v, value));
         }
 
-        // It's a new key -> may increase len, so grow if needed.
-        self.maybe_grow_for_insert();
+        // New key: maybe grow first.
+        self.maybe_grow_for_new_insert();
 
-        // Recompute index because we might have rehashed.
+        // Recompute index in case we rehashed.
         let idx = self.bucket_index(&key);
-        self.buckets[idx].push((key, value));
+        let bucket = &mut self.buckets[idx];
+
+        if !bucket.is_empty() {
+            self.collision_inserts += 1;
+        }
+
+        bucket.push((key, value));
         self.len += 1;
+
+        if bucket.len() > self.max_chain_len {
+            self.max_chain_len = bucket.len();
+        }
+
         None
     }
 
-    /// Get a given't key's value if it exists.
+    /// Returns the value for `key` if present.
     pub fn get(&self, key: &str) -> Option<&str> {
         let idx = self.bucket_index(key);
         self.buckets[idx]
@@ -120,38 +247,160 @@ impl HashMap {
             .find(|(k, _)| k == key)
             .map(|(_, v)| v.as_str())
     }
+
+    /// Removes `key` from the map, returning its value if present.
+    ///
+    /// This searches only the computed bucket (the chain) and removes the entry
+    /// using `swap_remove` (does not preserve chain order).
+    ///
+    /// On successful removal:
+    /// - `len` is decremented
+    /// - `max_chain_len` is recomputed
+    /// - the map may shrink if load factor < 0.2
+    pub fn remove(&mut self, key: &str) -> Option<String> {
+        let idx = self.bucket_index(key);
+        let bucket = &mut self.buckets[idx];
+
+        let pos = bucket.iter().position(|(k, _)| k == key)?;
+        let (_k, v) = bucket.swap_remove(pos);
+
+        self.len -= 1;
+        self.recompute_max_chain_len();
+        self.maybe_shrink_after_remove();
+
+        Some(v)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::HashMap;
 
     #[test]
-    fn hashmap_tests() {
+    fn insert_and_get_basic() {
         let mut m = HashMap::new();
-        assert_eq!(m.insert("lang".to_string(), "rust".to_string()), None);
+        assert_eq!(m.insert("lang".into(), "rust".into()), None);
         assert_eq!(m.get("lang"), Some("rust"));
-
-        // Update existing key:
-        assert_eq!(
-            m.insert("lang".to_string(), "Rust".to_string()),
-            Some("rust".to_string())
-        );
-        assert_eq!(m.get("lang"), Some("Rust"));
+        assert_eq!(m.len(), 1);
+        assert!(m.bucket_count() >= 10);
     }
 
     #[test]
-    fn load_factor_threshold_test() {
+    fn insert_replaces_value_without_changing_len() {
+        let mut m = HashMap::new();
+        assert_eq!(m.insert("k".into(), "v1".into()), None);
+        assert_eq!(m.insert("k".into(), "v2".into()), Some("v1".into()));
+        assert_eq!(m.get("k"), Some("v2"));
+        assert_eq!(m.len(), 1);
+    }
+
+    #[test]
+    fn remove_existing_and_nonexisting() {
+        let mut m = HashMap::new();
+        m.insert("x".into(), "10".into());
+        m.insert("y".into(), "20".into());
+
+        assert_eq!(m.remove("x"), Some("10".into()));
+        assert_eq!(m.get("x"), None);
+        assert_eq!(m.len(), 1);
+
+        assert_eq!(m.remove("does_not_exist"), None);
+        assert_eq!(m.len(), 1);
+    }
+
+    #[test]
+    fn grow_when_projected_load_reaches_75_percent() {
+        // Your map always starts with at least 10 buckets.
+        // Growth triggers when inserting would make (len + 1)/buckets >= 0.75.
+        // With 10 buckets: (len + 1) >= 8 triggers grow before insert.
         let mut m = HashMap::with_capacity(4);
+        assert_eq!(m.bucket_count(), 10);
 
-        // Insert enough to trigger growth (0.75 threshold).
-        m.insert("a".into(), "1".into()); // len=1, 1/4=0.25
-        m.insert("b".into(), "2".into()); // len=2, 2/4=0.5
-        // Next insert would make 3/4 = 0.75 -> triggers grow before insert
+        // Insert 7 items: no grow yet.
+        for i in 0..7 {
+            m.insert(format!("k{i}"), format!("v{i}"));
+        }
+        assert_eq!(m.len(), 7);
+        assert_eq!(m.bucket_count(), 10);
+
+        // Next insert (8th) should trigger grow to 20 before insertion.
+        m.insert("k7".into(), "v7".into());
+        assert_eq!(m.len(), 8);
+        assert_eq!(m.bucket_count(), 20);
+
+        // Sanity: a few keys still accessible after rehash.
+        assert_eq!(m.get("k0"), Some("v0"));
+        assert_eq!(m.get("k6"), Some("v6"));
+        assert_eq!(m.get("k7"), Some("v7"));
+    }
+
+    #[test]
+    fn shrink_after_growth_keeps_items() {
+        // Start at 10 buckets (min_buckets = 10), grow to 20 on 8th insert, then
+        // remove until load < 0.2 so it shrinks back to 10.
+        let mut m = HashMap::with_capacity(4);
+        assert_eq!(m.bucket_count(), 10);
+
+        for i in 0..8 {
+            m.insert(format!("k{i}"), format!("v{i}"));
+        }
+        assert_eq!(m.bucket_count(), 20);
+        assert_eq!(m.len(), 8);
+
+        // Remove 5 items -> len becomes 3. With 20 buckets: 3/20 = 0.15 < 0.2
+        // Shrink should occur during a successful remove.
+        for i in 0..5 {
+            assert!(m.remove(&format!("k{i}")).is_some());
+        }
+
+        assert_eq!(m.len(), 3);
+        assert_eq!(m.bucket_count(), 10); // shrunk back to min_buckets
+
+        // Remaining keys still present.
+        assert_eq!(m.get("k5"), Some("v5"));
+        assert_eq!(m.get("k6"), Some("v6"));
+        assert_eq!(m.get("k7"), Some("v7"));
+    }
+
+    #[test]
+    fn shrink_when_load_factor_below_0_2_but_not_below_min() {
+        // Because min_buckets = initial size (>=10), it won't shrink below that.
+        let mut m = HashMap::with_capacity(16);
+        assert_eq!(m.bucket_count(), 16);
+
+        m.insert("a".into(), "1".into());
+        m.insert("b".into(), "2".into());
         m.insert("c".into(), "3".into());
+        m.insert("d".into(), "4".into());
 
-        assert_eq!(m.get("a"), Some("1"));
-        assert_eq!(m.get("b"), Some("2"));
-        assert_eq!(m.get("c"), Some("3"));
+        m.remove("a");
+        m.remove("b");
+        m.remove("c");
+
+        // load = 1/16 = 0.0625 < 0.2, but already at min_buckets (16), so no shrink.
+        assert_eq!(m.bucket_count(), 16);
+        assert_eq!(m.get("d"), Some("4"));
+    }
+
+    #[test]
+    fn collisions_and_max_chain_length_are_tracked() {
+        // With min buckets=10 we can't force a single bucket.
+        // Instead, insert enough items that collisions are extremely likely,
+        // then assert the metrics make sense *if* collisions happened.
+        let mut m = HashMap::new();
+
+        for i in 0..200 {
+            m.insert(format!("k{i}"), format!("v{i}"));
+        }
+
+        assert_eq!(m.len(), 200);
+        assert!(m.max_chain_len() >= 1);
+
+        // It's theoretically possible (but astronomically unlikely) to have zero collisions here,
+        // but in practice this should be > 0. If you want a *deterministic* collision test,
+        // see Option B below.
+        assert!(m.collision_inserts() > 0);
+        assert!(m.current_collisions() > 0);
+        assert!(m.max_chain_len() >= 2);
     }
 }
