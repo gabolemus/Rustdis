@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use serde_json::json;
+
 use tokio::io::{self, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
@@ -33,7 +35,7 @@ async fn execute_command(map: Arc<Mutex<HashMap<String, String>>>, cmd: Command<
                 Err(_) => {
                     return build_json_response(
                         "HTTP/1.1 400 Bad Request",
-                        r#"{ "ok": false, "error": "key must be valid UTF-8" }"#,
+                        &json!({ "ok": false, "error": "Key must be valid UTF-i" }).to_string(),
                     );
                 }
             };
@@ -43,12 +45,12 @@ async fn execute_command(map: Arc<Mutex<HashMap<String, String>>>, cmd: Command<
                 // Minimal JSON escaping omitted for brevity (safe-ish for demo)
                 build_json_response(
                     "HTTP/1.1 200 OK",
-                    &format!(r#"{{ "ok": true, "key": "{key}", "value": "{v}" }}"#),
+                    &json!({ "ok": true, "key": key, "value": v }).to_string(),
                 )
             } else {
                 build_json_response(
-                    "HTTP/1.1 404 Not Found",
-                    r#"{ "ok": false, "error": "not found" }"#,
+                    "HTTP/1.1 200 OK",
+                    &json!({ "ok": false, "error": "Not found" }).to_string(),
                 )
             }
         }
@@ -75,7 +77,8 @@ async fn execute_command(map: Arc<Mutex<HashMap<String, String>>>, cmd: Command<
 
             let mut guard = map.lock().await;
             guard.insert(key, value);
-            build_json_response("HTTP/1.1 200 OK", r#"{ "ok": true }"#)
+
+            build_json_response("HTTP/1.1 200 OK", &json!({ "ok": true }).to_string())
         }
 
         Command::Del { key } => {
@@ -91,18 +94,67 @@ async fn execute_command(map: Arc<Mutex<HashMap<String, String>>>, cmd: Command<
 
             let mut guard = map.lock().await;
             let removed = guard.remove(&key).is_some();
+
             build_json_response(
                 "HTTP/1.1 200 OK",
-                &format!(r#"{{ "ok": true, "removed": {removed} }}"#),
+                &json!({ "ok": true, "removed": removed }).to_string(),
             )
         }
 
         Command::DbKeysNumber => {
             let guard = map.lock().await;
             let len = guard.len();
+
             build_json_response(
                 "HTTP/1.1 200 OK",
-                &format!(r#"{{ "ok": true, "totalKeys": {len} }}"#),
+                &json!({ "ok": true, "totalKeys": len }).to_string(),
+            )
+        }
+
+        Command::DbKeys => {
+            let guard = map.lock().await;
+            let keys = guard.keys();
+            let keys_json = keys.iter().map(|k| json!(k)).collect::<Vec<_>>();
+
+            build_json_response(
+                "HTTP/1.1 200 OK",
+                &json!({
+                    "ok": true,
+                    "keys": keys_json,
+                })
+                .to_string(),
+            )
+        }
+
+        Command::DbVals => {
+            let guard = map.lock().await;
+            let values = guard.values();
+            let values_json = values.iter().map(|v| json!(v)).collect::<Vec<_>>();
+
+            build_json_response(
+                "HTTP/1.1 200 OK",
+                &json!({
+                    "ok": true,
+                    "values": values_json,
+                })
+                .to_string(),
+            )
+        }
+
+        Command::DbKeyAndVals => {
+            let guard = map.lock().await;
+            let keys_values_json = guard
+                .iter()
+                .map(|(k, v)| json!({"key": k, "value": v}))
+                .collect::<Vec<_>>();
+
+            build_json_response(
+                "HTTP/1.1 200 OK",
+                &json!({
+                    "ok": true,
+                    "keysValues": keys_values_json
+                })
+                .to_string(),
             )
         }
     }
