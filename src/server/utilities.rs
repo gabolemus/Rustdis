@@ -11,6 +11,12 @@ pub enum Command<'a> {
     Del { key: &'a [u8] },
     /// Returns the number of keys stored.
     DbKeysNumber,
+    /// Returns a list of all the keys stored.
+    DbKeys,
+    /// Returns a list of all the values stored.
+    DbVals,
+    /// Returns a list of all key/value pairs stored.
+    DbKeyAndVals,
 }
 
 /// Errors that can occur while parsing the HTTP request.

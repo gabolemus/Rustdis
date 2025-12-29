@@ -78,8 +78,23 @@ pub fn parse_command_from_request_line<'a>(
     match method {
         b"GET" => {
             // Get the number of keys stored
-            if path == b"/dbkeys" {
+            if path == b"/dbkeysnum" {
                 return Ok(Command::DbKeysNumber);
+            }
+
+            // Get a list of the keys stored
+            if path == b"/dbkeys" {
+                return Ok(Command::DbKeys);
+            }
+
+            // Get a list of the values stored
+            if path == b"/dbvals" {
+                return Ok(Command::DbVals);
+            }
+
+            // Get a list of the key/value pairs stored
+            if path == b"/dbkeysvals" {
+                return Ok(Command::DbKeyAndVals);
             }
 
             if path != b"/get" {
