@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use serde_json::json;
+use serde_json::{Map, Value, json};
 
 use tokio::io::{self, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -143,18 +143,15 @@ async fn execute_command(map: Arc<Mutex<HashMap<String, String>>>, cmd: Command<
 
         Command::DbKeyAndVals => {
             let guard = map.lock().await;
-            let keys_values_json = guard
-                .iter()
-                .map(|(k, v)| json!({"key": k, "value": v}))
-                .collect::<Vec<_>>();
+            let mut map = Map::new();
+            for (k, v) in guard.iter() {
+                map.insert(k.clone(), Value::String(v.clone()));
+            }
+            std::mem::drop(guard);
 
             build_json_response(
                 "HTTP/1.1 200 OK",
-                &json!({
-                    "ok": true,
-                    "keysValues": keys_values_json
-                })
-                .to_string(),
+                &json!({ "ok": true, "keysValues": map }).to_string(),
             )
         }
     }
