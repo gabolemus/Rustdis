@@ -5,7 +5,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::signal;
 
-const SERVER_ADDR: &str = "0.0.0.0:7878";
+const DEFAULT_SERVER_ADDR: &str = "127.0.0.1:7878";
 
 #[derive(Debug)]
 enum CliCommand {
@@ -23,7 +23,8 @@ enum CliCommand {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    println!("Rustdis client connected to http://{SERVER_ADDR}");
+    let server_addr = server_addr();
+    println!("Rustdis client connected to http://{server_addr}");
     println!("Type `help` for commands, `exit` to quit.");
 
     let stdin = tokio::io::stdin();
@@ -68,7 +69,7 @@ async fn main() -> io::Result<()> {
         }
 
         let (method, target) = build_request_target(&command);
-        let response = match send_request(method, &target).await {
+        let response = match send_request(&server_addr, method, &target).await {
             Ok(resp) => resp,
             Err(err) => {
                 println!("(error) {err}");
@@ -173,13 +174,13 @@ fn build_request_target(command: &CliCommand) -> (&'static str, String) {
     }
 }
 
-async fn send_request(method: &str, target: &str) -> Result<Value, String> {
-    let mut stream = TcpStream::connect(SERVER_ADDR)
+async fn send_request(server_addr: &str, method: &str, target: &str) -> Result<Value, String> {
+    let mut stream = TcpStream::connect(server_addr)
         .await
-        .map_err(|e| format!("failed to connect to {SERVER_ADDR}: {e}"))?;
+        .map_err(|e| format!("failed to connect to {server_addr}: {e}"))?;
 
     let request =
-        format!("{method} {target} HTTP/1.1\r\nHost: {SERVER_ADDR}\r\nConnection: close\r\n\r\n");
+        format!("{method} {target} HTTP/1.1\r\nHost: {server_addr}\r\nConnection: close\r\n\r\n");
     stream
         .write_all(request.as_bytes())
         .await
@@ -193,6 +194,10 @@ async fn send_request(method: &str, target: &str) -> Result<Value, String> {
 
     let body = extract_body(&buf).ok_or_else(|| "invalid HTTP response".to_string())?;
     serde_json::from_slice(body).map_err(|e| format!("invalid JSON response: {e}"))
+}
+
+fn server_addr() -> String {
+    std::env::var("SERVER_ADDR").unwrap_or_else(|_| DEFAULT_SERVER_ADDR.to_string())
 }
 
 fn extract_body(buf: &[u8]) -> Option<&[u8]> {
