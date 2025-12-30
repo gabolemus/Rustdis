@@ -1,6 +1,5 @@
-//! Server utilities.
+//! Server modules.
 
-pub mod hash_map;
-pub mod http_parser;
-pub mod runner;
-pub mod utilities;
+pub mod protocol;
+pub mod storage;
+pub mod transport;

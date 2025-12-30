@@ -8,9 +8,9 @@ use tokio::io::{self, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
-use crate::server::hash_map::HashMap;
-use crate::server::http_parser;
-use crate::server::utilities::{Command, ParseError};
+use crate::server::protocol::command::{Command, ParseError};
+use crate::server::protocol::http;
+use crate::server::storage::hash_map::HashMap;
 
 /// Generate a minimal JSON HTTP response.
 fn build_json_response(status_line: &str, json_body: &str) -> Vec<u8> {
@@ -30,7 +30,7 @@ fn build_json_response(status_line: &str, json_body: &str) -> Vec<u8> {
 async fn execute_command(map: Arc<Mutex<HashMap<String, String>>>, cmd: Command<'_>) -> Vec<u8> {
     match cmd {
         Command::Get { key } => {
-            let key = match http_parser::bytes_to_string(key) {
+            let key = match http::bytes_to_string(key) {
                 Ok(k) => k,
                 Err(_) => {
                     return build_json_response(
@@ -56,7 +56,7 @@ async fn execute_command(map: Arc<Mutex<HashMap<String, String>>>, cmd: Command<
         }
 
         Command::Set { key, value } => {
-            let key = match http_parser::bytes_to_string(key) {
+            let key = match http::bytes_to_string(key) {
                 Ok(k) => k,
                 Err(_) => {
                     return build_json_response(
@@ -65,7 +65,7 @@ async fn execute_command(map: Arc<Mutex<HashMap<String, String>>>, cmd: Command<
                     );
                 }
             };
-            let value = match http_parser::bytes_to_string(value) {
+            let value = match http::bytes_to_string(value) {
                 Ok(v) => v,
                 Err(_) => {
                     return build_json_response(
@@ -82,7 +82,7 @@ async fn execute_command(map: Arc<Mutex<HashMap<String, String>>>, cmd: Command<
         }
 
         Command::Del { key } => {
-            let key = match http_parser::bytes_to_string(key) {
+            let key = match http::bytes_to_string(key) {
                 Ok(k) => k,
                 Err(_) => {
                     return build_json_response(
@@ -170,7 +170,7 @@ pub async fn handle_connection(
     datastore: Arc<Mutex<HashMap<String, String>>>,
 ) -> io::Result<()> {
     // 1) Read headers
-    let (buf, header_end) = match http_parser::read_until_headers(&mut stream).await {
+    let (buf, header_end) = match http::read_until_headers(&mut stream).await {
         Ok(v) => v,
         Err(e) => {
             // Could try to respond 400/431; for now respond 400 on parse-ish errors
@@ -186,7 +186,7 @@ pub async fn handle_connection(
     };
 
     // 2) Extract request line
-    let request_line = match http_parser::request_line_from_headers(&buf, header_end) {
+    let request_line = match http::request_line_from_headers(&buf, header_end) {
         Ok(l) => l,
         Err(_) => {
             let resp = build_json_response(
@@ -205,7 +205,7 @@ pub async fn handle_connection(
     );
 
     // 3) Parse command from request line (no allocations here)
-    let cmd = match http_parser::parse_command_from_request_line(request_line) {
+    let cmd = match http::parse_command_from_request_line(request_line) {
         Ok(c) => c,
         Err(e) => {
             let (status, body) = match e {

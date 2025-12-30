@@ -3,7 +3,7 @@
 use tokio::io::{self, AsyncReadExt};
 use tokio::net::TcpStream;
 
-use crate::server::utilities::{Command, ParseError};
+use crate::server::protocol::command::{Command, ParseError};
 
 const MAX_HEADER_BYTES: usize = 32 * 1024; // Safety cap
 const TMP_BUF_SIZE: usize = 4096;
