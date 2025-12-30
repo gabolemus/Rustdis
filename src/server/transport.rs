@@ -55,7 +55,7 @@ pub async fn handle_connection(
     };
     println!(
         "Request: {}",
-        str::from_utf8(request_line).expect("Could not parse request as UTF-8")
+        std::str::from_utf8(request_line).expect("Could not parse request as UTF-8")
     );
 
     // 3) Parse command from request line (no allocations here)
